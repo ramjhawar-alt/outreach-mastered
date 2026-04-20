@@ -35,7 +35,7 @@ Edit `.env` with your keys:
 | `YDC_API_KEY` | Web search for org enrichment | [You.com](https://documentation.you.com/) (free) |
 | `GROQ_API_KEY` | LLM for "What they do" phrases | [Groq Console](https://console.groq.com/) (free) |
 | `OPENROUTER_API_KEY` | Fallback LLM | [OpenRouter](https://openrouter.ai/keys) (free models available) |
-| `APOLLO_API_KEY` | Find founder/CEO emails | [Apollo.io](https://app.apollo.io/#/settings/integrations/api) (free — only uses search, never spends credits) |
+| `APOLLO_API_KEY` | Find founder/CEO emails | [Apollo.io](https://app.apollo.io/#/settings/integrations/api) (free search; 1 credit per email reveal — only when you explicitly ask) |
 
 ### 3. Set up Google Sheets
 
@@ -76,9 +76,11 @@ from src.apollo import find_founder_email
 name, email, title = find_founder_email("Readily", domain="readily.co")
 ```
 
-This uses Apollo's **People Search** endpoint which is completely free — no credits consumed, ever. It searches by company domain and finds founders/CEOs. If Apollo's free search already has their email on file, you get it. If not, it returns the name and title without the email.
+How it works:
+1. **Free search** (no credits) — finds founders/CEOs by company domain. If the email is already on file, you get it free
+2. **Email reveal** (1 credit) — if search found a person but not their email, it spends 1 credit to reveal it
 
-> **Note:** Apollo is never called automatically during scraping or email sending. It's a separate tool you use manually in Python when you want to upgrade a generic email to a direct founder contact.
+> **Important:** Apollo is never called automatically during scraping or email sending. It only runs when you explicitly call `find_founder_email()` in Python. Normal CLI usage (`main.py`) never touches Apollo or spends credits.
 
 ### Enrich existing sheet data
 
