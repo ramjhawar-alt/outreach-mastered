@@ -1,9 +1,9 @@
 """
-Resolve company homepages via You.com (YDC), Brave Search API, or Google Custom Search, then
-generate a short \"work towards …\" phrase via Groq or OpenRouter (both have free tiers).
+Resolve company homepages via You.com (YDC) web search, then generate a short
+"work towards …" phrase via Groq or OpenRouter (both have free tiers).
 
 When enriching, the live ARPA-H ADVOCATE Teaming table is scraped so each org's official
-\"research focus\" text can ground the phrase (see ADVOCATE_TEAMING_URL).
+"research focus" text can ground the phrase (see ADVOCATE_TEAMING_URL).
 """
 
 from __future__ import annotations
@@ -17,12 +17,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .config import (
-    BRAVE_API_KEY,
-    BRAVE_EXTRA_SNIPPETS,
-    BRAVE_SEARCH_COUNT,
-    GOOGLE_CSE_API_KEY,
-    GOOGLE_CSE_CX,
     YDC_API_KEY,
+    YDC_SEARCH_COUNT,
     ENRICH_LLM_PRIMARY,
     GROQ_API_KEY,
     GROQ_MODEL,
@@ -34,7 +30,6 @@ from .config import (
 )
 from .extractor import ExtractedData
 
-# Domains to skip when picking an "official website" from search results
 SKIP_RESULT_DOMAINS = frozenset(
     {
         "linkedin.com",
@@ -58,8 +53,6 @@ SKIP_RESULT_DOMAINS = frozenset(
     }
 )
 
-_CSE_URL = "https://www.googleapis.com/customsearch/v1"
-_BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 _YDC_SEARCH_URL = "https://ydc-index.io/v1/search"
 _OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 ADVOCATE_TEAMING_URL = (
@@ -76,8 +69,8 @@ def fetch_advocate_teaming_research_by_org(
     timeout: float = 60.0,
 ) -> dict[str, str]:
     """
-    Map normalized organization name -> \"research focus\" cell text from the public
-    ADVOCATE Teaming table on arpa-h.gov (same listing the user sees when browsing teams).
+    Map normalized organization name -> "research focus" cell text from the public
+    ADVOCATE Teaming table on arpa-h.gov.
     """
     out: dict[str, str] = {}
     try:
@@ -120,7 +113,6 @@ def _hints_from_item(item: ExtractedData) -> dict[str, str | None]:
     return {"contact_name": item.contact_name, "email_domain": domain}
 
 
-# Domains that rarely help site resolution and bloat Brave's 400-char / 50-word query limit
 _SKIP_EMAIL_DOMAINS = frozenset(
     {
         "gmail.com",
@@ -147,40 +139,16 @@ def build_search_query(organization: str, hints: dict[str, str | None]) -> str:
     return " ".join(parts)
 
 
-def _brave_sanitize_query(query: str) -> str:
-    """Brave allows max 400 chars and 50 words on q=."""
-    words = query.split()
-    q = " ".join(words[:50]).strip()
-    if len(q) > 400:
-        q = q[:400]
-        if " " in q:
-            q = q.rsplit(" ", 1)[0]
-    return q
-
-
-def _youcom_api_key() -> str:
-    """You.com (YDC) keys often start with ydc-sk-; those belong here, not Brave."""
-    y = (YDC_API_KEY or "").strip()
-    if y:
-        return y
-    b = (BRAVE_API_KEY or "").strip()
-    if b.startswith("ydc-sk"):
-        return b
-    return ""
-
-
-def youcom_web_search(query: str, num: int | None = None) -> list[dict[str, str]]:
-    """You.com / YDC unified web search (https://ydc-index.io/v1/search)."""
-    api_key = _youcom_api_key()
-    if not api_key:
+def web_search(query: str, num: int = 10) -> list[dict[str, str]]:
+    """Run a You.com (YDC) web search for org resolution."""
+    if not YDC_API_KEY:
         raise ValueError(
-            "You.com search is not configured. Set YDC_API_KEY in .env "
-            "(https://documentation.you.com/) or use a Brave / Google CSE key."
+            "Web search not configured. Set YDC_API_KEY in .env "
+            "(get one free at https://documentation.you.com/)."
         )
-    count = num if num is not None else BRAVE_SEARCH_COUNT
-    count = min(max(1, count), 20)
-    headers = {"X-API-Key": api_key}
-    params = {"query": query, "count": count}
+    count = min(max(1, num), 20)
+    headers = {"X-API-Key": YDC_API_KEY}
+    params = {"query": query, "count": min(count, YDC_SEARCH_COUNT)}
     with httpx.Client(timeout=45.0) as client:
         r = client.get(_YDC_SEARCH_URL, headers=headers, params=params)
         r.raise_for_status()
@@ -206,103 +174,6 @@ def youcom_web_search(query: str, num: int | None = None) -> list[dict[str, str]
     return out
 
 
-def brave_web_search(query: str, num: int | None = None) -> list[dict[str, str]]:
-    """Brave Web Search API — full web index, no Programmable Search Engine."""
-    if not BRAVE_API_KEY:
-        raise ValueError(
-            "Brave Search is not configured. Set BRAVE_API_KEY in .env "
-            "(see https://api-dashboard.search.brave.com/)."
-        )
-    count = num if num is not None else BRAVE_SEARCH_COUNT
-    count = min(max(1, count), 20)
-    q = _brave_sanitize_query(query)
-    # Brave returns 422 if Cache-Control is missing or not exactly "no-cache" (some HTTP stacks send other values).
-    headers = {
-        "X-Subscription-Token": BRAVE_API_KEY,
-        "Cache-Control": "no-cache",
-    }
-    params: dict[str, str | int] = {"q": q, "count": count}
-    if BRAVE_EXTRA_SNIPPETS:
-        params["extra_snippets"] = "true"
-    with httpx.Client(timeout=45.0) as client:
-        r = client.get(_BRAVE_WEB_SEARCH_URL, headers=headers, params=params)
-        if r.status_code == 422:
-            detail = (r.text or "")[:300]
-            raise ValueError(
-                f"Brave Search 422 (query rejected). Try shorter org names or BRAVE_EXTRA_SNIPPETS=0. Body: {detail}"
-            )
-        r.raise_for_status()
-        data = r.json()
-    web = data.get("web") or {}
-    raw_results = web.get("results") or []
-    out: list[dict[str, str]] = []
-    for item in raw_results:
-        link = (item.get("url") or "").strip()
-        if not link.startswith("http"):
-            continue
-        title = (item.get("title") or "").strip()
-        desc = (item.get("description") or "").strip()
-        extras = item.get("extra_snippets") or []
-        if isinstance(extras, list) and extras:
-            desc = f"{desc} {' '.join(str(x) for x in extras[:3])}".strip()
-        out.append(
-            {
-                "link": link.split("#")[0],
-                "title": title,
-                "snippet": desc,
-            }
-        )
-    return out
-
-
-def google_cse_search(query: str, num: int = 8) -> list[dict[str, str]]:
-    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX:
-        raise ValueError(
-            "Google Custom Search is not configured. Set GOOGLE_CSE_API_KEY and "
-            "GOOGLE_CSE_CX in .env (see .env.example)."
-        )
-    params = {
-        "key": GOOGLE_CSE_API_KEY,
-        "cx": GOOGLE_CSE_CX,
-        "q": query,
-        "num": min(max(1, num), 10),
-    }
-    with httpx.Client(timeout=45.0) as client:
-        r = client.get(_CSE_URL, params=params)
-        r.raise_for_status()
-        data = r.json()
-    out: list[dict[str, str]] = []
-    for it in data.get("items") or []:
-        link = (it.get("link") or "").strip()
-        if not link.startswith("http"):
-            continue
-        out.append(
-            {
-                "link": link.split("#")[0],
-                "title": (it.get("title") or "").strip(),
-                "snippet": (it.get("snippet") or "").strip(),
-            }
-        )
-    return out
-
-
-def web_search(query: str, num: int = 10) -> list[dict[str, str]]:
-    """
-    Run a web search for org resolution. Prefer You.com (YDC) when YDC_API_KEY is set
-    or BRAVE_API_KEY looks like a ydc-sk- You.com key; else Brave; else Google CSE.
-    """
-    if _youcom_api_key():
-        return youcom_web_search(query, num=num)
-    if BRAVE_API_KEY:
-        return brave_web_search(query, num=num)
-    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
-        return google_cse_search(query, num=min(num, 10))
-    raise ValueError(
-        "No web search configured. Set YDC_API_KEY (You.com), BRAVE_API_KEY (Brave), or "
-        "GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX (Google Custom Search). See README."
-    )
-
-
 def pick_homepage_url(results: list[dict[str, str]]) -> str | None:
     for it in results:
         link = it.get("link") or ""
@@ -319,7 +190,6 @@ def pick_homepage_url(results: list[dict[str, str]]) -> str | None:
 
 
 def format_snippets_for_llm(results: list[dict[str, str]], max_items: int = 6) -> list[str]:
-    """Compact lines for the LLM; search snippets can be very long."""
     lines = []
     cap = 380
     for it in results[:max_items]:
@@ -334,7 +204,6 @@ def format_snippets_for_llm(results: list[dict[str, str]], max_items: int = 6) -
 
 
 def _strip_llm_json_text(raw: str) -> str:
-    """Remove markdown code fences some chat models wrap around JSON."""
     t = raw.strip()
     m = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", t, re.IGNORECASE)
     if m:
@@ -343,7 +212,6 @@ def _strip_llm_json_text(raw: str) -> str:
 
 
 def _json_from_reasoning_prose(text: str) -> str | None:
-    """Some OpenRouter models put the JSON only in message.reasoning."""
     if not text or '{"approach_phrase"' not in text:
         return None
     idx = text.rfind('{"approach_phrase"')
@@ -390,8 +258,6 @@ def _validate_phrase(phrase: str, organization: str) -> str | None:
         phrase = phrase.rstrip(".")
     low = phrase.lower()
     org_compact = " ".join(organization.lower().split())
-    # Reject only if the full company name appears inside the phrase (not per-token,
-    # so "access" in "Access Heart" does not block "improving access to care").
     if len(org_compact) > 4 and org_compact in low:
         return None
     return phrase
@@ -405,8 +271,7 @@ def generate_approach_phrase(
     arpa_h_listing_research: str | None = None,
 ) -> str | None:
     """
-    Short fragment for email templates, e.g. \"found the work towards {phrase} very compelling.\"
-    Ground truth: ARPA-H ADVOCATE Teaming \"research focus\" text when available; else web snippets.
+    Short fragment for email templates, e.g. "found the work towards {phrase} very compelling."
     Max ~7 words / 72 chars; no fabricated claims.
     """
     context = "\n".join(snippets[:8]) if snippets else "(no search snippets)"
@@ -476,7 +341,6 @@ def generate_approach_phrase(
 
 
 def _groq_chat_completion(system: str, user: str) -> str | None:
-    """Groq chat with JSON response; retries on rate limits."""
     if not GROQ_API_KEY:
         return None
     from groq import Groq
@@ -533,9 +397,9 @@ def _groq_chat_completion(system: str, user: str) -> str | None:
 
 
 def _llm_json_completion(system: str, user: str) -> str | None:
-    primary = (ENRICH_LLM_PRIMARY or "openrouter").strip().lower()
+    primary = (ENRICH_LLM_PRIMARY or "groq").strip().lower()
     if primary not in ("groq", "openrouter"):
-        primary = "openrouter"
+        primary = "groq"
 
     def or_complete() -> str | None:
         if not OPENROUTER_API_KEY:
@@ -569,7 +433,6 @@ def _llm_json_completion(system: str, user: str) -> str | None:
 
 
 def _openrouter_chat_completion(system: str, user: str) -> str | None:
-    """OpenRouter chat completions (free tier models available)."""
     payload: dict = {
         "model": OPENROUTER_MODEL,
         "messages": [
@@ -584,7 +447,7 @@ def _openrouter_chat_completion(system: str, user: str) -> str | None:
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": OPENROUTER_HTTP_REFERER,
-        "X-Title": "Browser Agent org enrichment",
+        "X-Title": "Outreach Mastered org enrichment",
     }
     data: dict | None = None
     max_attempts = 12
@@ -630,9 +493,6 @@ def _openrouter_chat_completion(system: str, user: str) -> str | None:
 
 
 def resolve_website(org: str, hints: dict[str, str | None]) -> tuple[str | None, list[str]]:
-    """
-    Return (homepage_url_or_none, snippet_lines_for_llm).
-    """
     query = build_search_query(org, hints)
     results = web_search(query)
     url = pick_homepage_url(results)
@@ -651,21 +511,8 @@ def enrich_org_metadata(
     arpa_profiles_prefetched: dict[str, str] | None = None,
 ) -> tuple[list[ExtractedData], int]:
     """
-    For each distinct organization (first-seen order), run web search; set source_url to
-    the resolved homepage when found (unless preserve_source_url). Unless url_only, also run
-    LLM and set what_they_do. When preserve_source_url, the LLM still sees search snippets but
-    the website line uses each row's existing Source URL if it is http(s).
-    Rows sharing the same organization name reuse one lookup.
-
-    If only_empty_wtd is True, only organizations with at least one row missing what_they_do
-    are considered (still in sheet order), then limit (if set) applies to that list.
-
-    If arpa_profiles_prefetched is not None, use it instead of fetching the ARPA-H teaming table
-    again (for batched sheet enrichment).
-
-    Returns:
-        (items, n_phrases) where n_phrases is how many distinct org keys got a non-empty
-        what_they_do phrase this run.
+    For each distinct organization, run web search to resolve homepage + LLM to generate
+    a "What they do" phrase. Rows sharing the same org name reuse one lookup.
     """
     if not items:
         return items, 0
@@ -673,30 +520,19 @@ def enrich_org_metadata(
     if listing_url:
         print(f"  (scraped listing: {listing_url[:90]}...)")
 
-    if _youcom_api_key():
-        print("  Web search: You.com (YDC)")
-    elif BRAVE_API_KEY:
-        print("  Web search: Brave Search API")
-    elif GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
-        print("  Web search: Google Custom Search")
+    print("  Web search: You.com (YDC)")
 
-    # Validate configuration early
-    if not _youcom_api_key() and not BRAVE_API_KEY and (
-        not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX
-    ):
-        raise ValueError(
-            "Set YDC_API_KEY, BRAVE_API_KEY, or (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) "
-            "for --enrich-org (see README)."
-        )
+    if not YDC_API_KEY:
+        raise ValueError("Set YDC_API_KEY for --enrich-org (see README).")
     if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY:
         raise ValueError(
             "Set GROQ_API_KEY or OPENROUTER_API_KEY for --enrich-org phrase generation (see README)."
         )
 
     if not url_only:
-        _p = (ENRICH_LLM_PRIMARY or "openrouter").strip().lower()
+        _p = (ENRICH_LLM_PRIMARY or "groq").strip().lower()
         if _p not in ("groq", "openrouter"):
-            _p = "openrouter"
+            _p = "groq"
         _groq_first = _p == "groq" and GROQ_API_KEY
         if _groq_first:
             _fb = (
@@ -710,6 +546,7 @@ def enrich_org_metadata(
             print(f"  LLM: OpenRouter ({OPENROUTER_MODEL}){_fb}")
         elif GROQ_API_KEY:
             print(f"  LLM: Groq ({GROQ_MODEL})")
+
     ordered_keys: list[str] = []
     seen_keys: set[str] = set()
     key_to_representative: dict[str, ExtractedData] = {}
@@ -807,13 +644,13 @@ def enrich_org_metadata(
                 print(f"    -> phrase: {phrase[:100]}")
             elif not url_only:
                 print(
-                    "    -> phrase: (none — check OPENROUTER_API_KEY / GROQ_API_KEY, "
-                    "ENRICH_LLM_PRIMARY, model, rate limits, or logs)"
+                    "    -> phrase: (none — check GROQ_API_KEY / OPENROUTER_API_KEY, "
+                    "model, rate limits, or logs)"
                 )
         except Exception as e:
             print(f"    -> skip ({e})")
             cache[key] = (None, None)
-        _gap_primary = (ENRICH_LLM_PRIMARY or "openrouter").strip().lower()
+        _gap_primary = (ENRICH_LLM_PRIMARY or "groq").strip().lower()
         if (
             OPENROUTER_API_KEY
             and _gap_primary == "openrouter"
@@ -839,12 +676,8 @@ def enrich_org_metadata(
 
 def check_enrich_org_config(*, url_only: bool = False) -> str | None:
     """Return error message if config is incomplete, else None."""
-    if (
-        not _youcom_api_key()
-        and not BRAVE_API_KEY
-        and (not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX)
-    ):
-        return "Missing YDC_API_KEY / BRAVE_API_KEY or (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX)."
+    if not YDC_API_KEY:
+        return "Missing YDC_API_KEY (get one free at https://documentation.you.com/)."
     if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY:
         return "Missing GROQ_API_KEY and OPENROUTER_API_KEY (need at least one for phrase generation)."
     return None
