@@ -17,8 +17,6 @@ GOOGLE_CREDENTIALS_PATH = os.getenv(
     str(Path.cwd() / "credentials.json"),
 )
 
-# Optional LLM (alternate phrase generator for org enrichment)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Web search for --enrich-org: You.com (YDC) if YDC_API_KEY or ydc-sk- key in BRAVE_API_KEY;
 # else Brave; else Google CSE.
@@ -49,7 +47,7 @@ OPENROUTER_MODEL = os.getenv(
 )
 OPENROUTER_HTTP_REFERER = os.getenv(
     "OPENROUTER_HTTP_REFERER",
-    "https://github.com/local/browser-agent",
+    "https://github.com/local/outreach-mastered",
 )
 # Extra pause between orgs during --enrich-org (reduces OpenRouter 429s on free models)
 OPENROUTER_ENRICH_GAP_SEC = float(os.getenv("OPENROUTER_ENRICH_GAP_SEC", "3"))

@@ -739,7 +739,7 @@ def main() -> None:
     parser.add_argument(
         "--enrich-org",
         action="store_true",
-        help="Resolve official website (Google CSE) + short What they do phrase (Groq/OpenAI); "
+        help="Resolve official website + short What they do phrase (Groq/OpenRouter); "
         "disables table fill-desc for this run",
     )
     parser.add_argument(
