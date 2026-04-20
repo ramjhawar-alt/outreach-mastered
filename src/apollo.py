@@ -1,4 +1,4 @@
-"""Apollo.io integration: find people by company domain + title, enrich for email."""
+"""Apollo.io integration: find people by company domain + title (free search only, no credits used)."""
 
 from __future__ import annotations
 
@@ -36,8 +36,7 @@ def search_people_at_domain(
 ) -> list[dict]:
     """
     Search Apollo for people at a company domain filtered by title/seniority.
-    This endpoint is FREE (no credit cost).
-    Returns list of person dicts from Apollo's response.
+    This endpoint is FREE — no credit cost ever.
     """
     if not APOLLO_API_KEY:
         return []
@@ -68,57 +67,14 @@ def search_people_at_domain(
         return []
 
 
-def enrich_person_email(
-    *,
-    first_name: str | None = None,
-    last_name: str | None = None,
-    domain: str | None = None,
-    email: str | None = None,
-    apollo_id: str | None = None,
-) -> dict | None:
-    """
-    Enrich a person via Apollo to get their work email.
-    Consumes 1 credit per successful match.
-    """
-    if not APOLLO_API_KEY:
-        return None
-
-    payload: dict = {"reveal_personal_emails": False}
-    if apollo_id:
-        payload["id"] = apollo_id
-    if email:
-        payload["email"] = email
-    if first_name:
-        payload["first_name"] = first_name
-    if last_name:
-        payload["last_name"] = last_name
-    if domain:
-        payload["organization_domain"] = domain
-
-    try:
-        resp = httpx.post(
-            f"{_BASE}/api/v1/people/match",
-            headers=_headers(),
-            json=payload,
-            timeout=_TIMEOUT,
-        )
-        if resp.status_code != 200:
-            print(f"  Apollo enrich: HTTP {resp.status_code}")
-            return None
-        data = resp.json()
-        return data.get("person")
-    except Exception as e:
-        print(f"  Apollo enrich error: {e}")
-        return None
-
-
 def find_founder_email(
     org_name: str,
     domain: str | None = None,
     source_url: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """
-    High-level: find a founder/CEO at a company and return their email.
+    Find a founder/CEO at a company and return their email if Apollo's free
+    search already has it. Never calls paid enrichment endpoints.
 
     Returns (contact_name, email, title) or (None, None, None).
     """
@@ -159,22 +115,5 @@ def find_founder_email(
         print(f"  Apollo: found {name} ({title}) — {email_addr}")
         return name, email_addr, title
 
-    apollo_id = best.get("id")
-    first = best.get("first_name")
-    last = best.get("last_name")
-
-    print(f"  Apollo: found {name} ({title}), enriching for email...")
-    person = enrich_person_email(
-        first_name=first,
-        last_name=last,
-        domain=d,
-        apollo_id=apollo_id,
-    )
-    if person:
-        email_addr = person.get("email")
-        if email_addr:
-            print(f"  Apollo: enriched — {email_addr}")
-            return name or person.get("name", ""), email_addr, title or person.get("title", "")
-
-    print(f"  Apollo: could not get email for {name}")
+    print(f"  Apollo: found {name} ({title}) but no email in free search results")
     return name, None, title
