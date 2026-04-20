@@ -119,6 +119,16 @@ python3 -u main.py --sync-email-replies --from-sheet YOUR_SHEET_ID
 
 Updates the sheet: `email not sent` → `email sent` → `replied`.
 
+### Attach a PDF (resume, one-pager, etc.)
+
+Drop your file in the `attachments/` folder, then set the path in `.env`:
+
+```
+OUTREACH_RESUME_PDF=attachments/YourResume.pdf
+```
+
+It gets attached to every email sent via `--email` or `--email-daily`.
+
 ### Bring your own sheet
 
 The tool reads column headers by name — column order doesn't matter:
