@@ -1,6 +1,6 @@
 """
 Resolve company homepages via You.com (YDC), Brave Search API, or Google Custom Search, then
-generate a short \"work towards …\" phrase via OpenRouter, Groq, or OpenAI.
+generate a short \"work towards …\" phrase via Groq or OpenRouter (both have free tiers).
 
 When enriching, the live ARPA-H ADVOCATE Teaming table is scraped so each org's official
 \"research focus\" text can ground the phrase (see ADVOCATE_TEAMING_URL).
@@ -26,7 +26,6 @@ from .config import (
     ENRICH_LLM_PRIMARY,
     GROQ_API_KEY,
     GROQ_MODEL,
-    OPENAI_API_KEY,
     OPENROUTER_API_KEY,
     OPENROUTER_HTTP_REFERER,
     OPENROUTER_ENRICH_GAP_SEC,
@@ -62,7 +61,6 @@ SKIP_RESULT_DOMAINS = frozenset(
 _CSE_URL = "https://www.googleapis.com/customsearch/v1"
 _BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 _YDC_SEARCH_URL = "https://ydc-index.io/v1/search"
-_OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 _OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 ADVOCATE_TEAMING_URL = (
     "https://arpa-h.gov/explore-funding/programs/advocate/teaming"
@@ -562,24 +560,16 @@ def _llm_json_completion(system: str, user: str) -> str | None:
         if out is not None:
             return out
 
-    if OPENAI_API_KEY:
-        return _post_chat_completion(
-            _OPENAI_CHAT_URL,
-            OPENAI_API_KEY,
-            "gpt-4o-mini",
-            system,
-            user,
-        )
-    if not OPENROUTER_API_KEY and not GROQ_API_KEY and not OPENAI_API_KEY:
+    if not OPENROUTER_API_KEY and not GROQ_API_KEY:
         raise ValueError(
-            "No LLM API key configured. Set OPENROUTER_API_KEY, GROQ_API_KEY, "
-            "or OPENAI_API_KEY in .env."
+            "No LLM API key configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in .env "
+            "(both have free tiers)."
         )
     return None
 
 
 def _openrouter_chat_completion(system: str, user: str) -> str | None:
-    """OpenRouter OpenAI-compatible chat completions."""
+    """OpenRouter chat completions (free tier models available)."""
     payload: dict = {
         "model": OPENROUTER_MODEL,
         "messages": [
@@ -637,39 +627,6 @@ def _openrouter_chat_completion(system: str, user: str) -> str | None:
         if extracted:
             return extracted
     return None
-
-
-def _post_chat_completion(
-    url: str,
-    api_key: str,
-    model: str,
-    system: str,
-    user: str,
-) -> str | None:
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 200,
-        "response_format": {"type": "json_object"},
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    with httpx.Client(timeout=60.0) as client:
-        r = client.post(url, headers=headers, json=payload)
-        r.raise_for_status()
-        data = r.json()
-    choices = data.get("choices") or []
-    if not choices:
-        return None
-    msg = choices[0].get("message") or {}
-    content = msg.get("content")
-    return content if isinstance(content, str) else None
 
 
 def resolve_website(org: str, hints: dict[str, str | None]) -> tuple[str | None, list[str]]:
@@ -731,9 +688,9 @@ def enrich_org_metadata(
             "Set YDC_API_KEY, BRAVE_API_KEY, or (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) "
             "for --enrich-org (see README)."
         )
-    if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY and not OPENAI_API_KEY:
+    if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY:
         raise ValueError(
-            "Set OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY for --enrich-org phrase generation (see README)."
+            "Set GROQ_API_KEY or OPENROUTER_API_KEY for --enrich-org phrase generation (see README)."
         )
 
     if not url_only:
@@ -753,9 +710,6 @@ def enrich_org_metadata(
             print(f"  LLM: OpenRouter ({OPENROUTER_MODEL}){_fb}")
         elif GROQ_API_KEY:
             print(f"  LLM: Groq ({GROQ_MODEL})")
-        elif OPENAI_API_KEY:
-            print("  LLM: OpenAI")
-
     ordered_keys: list[str] = []
     seen_keys: set[str] = set()
     key_to_representative: dict[str, ExtractedData] = {}
@@ -891,6 +845,6 @@ def check_enrich_org_config(*, url_only: bool = False) -> str | None:
         and (not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX)
     ):
         return "Missing YDC_API_KEY / BRAVE_API_KEY or (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX)."
-    if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY and not OPENAI_API_KEY:
-        return "Missing OPENROUTER_API_KEY, GROQ_API_KEY, and OPENAI_API_KEY (need one for phrase generation)."
+    if not url_only and not OPENROUTER_API_KEY and not GROQ_API_KEY:
+        return "Missing GROQ_API_KEY and OPENROUTER_API_KEY (need at least one for phrase generation)."
     return None
