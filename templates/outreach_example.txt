@@ -1,0 +1,12 @@
+Subject: Interest in {organization}
+
+Hi {contact_name},
+
+I recently came across {organization} and found the work towards {what_they_do} very compelling.
+
+I'd love to learn more and explore the possibility of contributing to what you're building. I'll keep this email brief — I'm genuinely interested in {organization}'s mission and believe I can add meaningful value.
+
+I've attached my resume below and look forward to hearing from you!
+
+Best,
+[Your Name]
