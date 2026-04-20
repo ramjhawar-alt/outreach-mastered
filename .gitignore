@@ -2,9 +2,13 @@
 credentials.json
 .env
 
-# Local outreach state (quota + Message-ID metadata for reply sync)
+# Local outreach state
 outreach_send_state.json
 *.send.lock
+
+# User attachments (keep the folder, ignore the files)
+attachments/*.pdf
+attachments/*.PDF
 
 # Python
 __pycache__/
