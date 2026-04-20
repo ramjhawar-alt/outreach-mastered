@@ -1,0 +1,27 @@
+# Credentials — never commit
+credentials.json
+.env
+
+# Local outreach state (quota + Message-ID metadata for reply sync)
+outreach_send_state.json
+*.send.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+dist/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Cursor
+.cursor/
