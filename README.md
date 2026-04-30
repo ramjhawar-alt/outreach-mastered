@@ -1,51 +1,23 @@
 # Outreach Mastered
 
-**CLI pipeline for web scraping, contact extraction, LLM-assisted enrichment, Google Sheets workflows, and template-based email outreach** — built to run locally with free-tier APIs where possible.
+A small **command-line tool** for anyone doing outreach: pull contacts from the web (or a Google Sheet), keep everything in **Sheets** as your working list, and send **personalized emails** from a template—with sensible limits so you do not blast inboxes by accident.
+
+Works well on **free tiers** where possible (Groq, OpenRouter, You.com-style search, etc.).
+
+**Built with:** Python · Playwright · BeautifulSoup · Google Sheets (`gspread`) · Gmail SMTP/IMAP · Groq / OpenRouter (optional Apollo from Python only).
 
 ---
 
-## Why this project (portfolio)
+## What it does
 
-This repository demonstrates **end-to-end automation** across problems recruiters care about:
-
-| Area | What the code shows |
-|------|---------------------|
-| **Browser automation** | Playwright-driven scraping with multiple extraction strategies (tables, link directories, single pages, infinite scroll). |
-| **Data integration** | Google Sheets as a live CRM: append exports, in-place column updates, validation, and status columns. |
-| **External APIs** | Service account auth (Google), REST clients (Groq, OpenRouter, You.com-style search, optional Apollo). |
-| **Email systems** | MIME construction (HTML + plain-text fallback, PDF attachments), SMTP send, optional IMAP (drafts + reply sync). |
-| **Reliability & safety** | Daily send caps, random inter-send delays, duplicate-address failsafes, file-based send state, optional send locking. |
-
-It is a **small but real systems project**: configuration, error paths, and CLI design matter as much as the happy path.
+1. **Scrape** — Tables, link lists, or single pages; optional scroll for long pages and optional “deep” fetch for emails on company sites.  
+2. **Enrich** — Web search + LLM to fill in company URLs and a short “What they do” line; can update an existing sheet in place.  
+3. **Export to Sheets** — One row per contact, plus an **Email status** column you can filter on.  
+4. **Send mail** — Plain text or HTML templates, PDF attachments, daily caps, random gaps between sends, and optional sync so **replies** can be reflected on the sheet.
 
 ---
 
-## Tech stack
-
-| Layer | Technologies |
-|--------|----------------|
-| Runtime | Python 3 |
-| Browser | Playwright (Chromium) |
-| Parsing | BeautifulSoup |
-| Sheets | `gspread`, Google service account (Sheets + Drive scopes) |
-| HTTP | `httpx` |
-| LLM | Groq SDK; OpenRouter via HTTP (enrichment fallback) |
-| Config | `python-dotenv` |
-| Email | `smtplib`, `imaplib`, `email` (MIME) |
-
----
-
-## Features
-
-1. **Scrape** — Auto, table, links, or single-page modes; optional deep crawl to company sites for emails; scroll for lazy-loaded lists.  
-2. **Enrich** — Web search + LLM to resolve company sites and short “What they do” copy; optional in-place sheet updates without re-scraping.  
-3. **Export** — Append structured rows to Google Sheets with headers and email-status tracking.  
-4. **Outreach** — Curly-brace placeholders in templates (`{contact_name}`, `{organization}`, `{email}`, `{what_they_do}`); plain text or HTML; multiple PDFs for event-style templates.  
-5. **Operations** — Daily caps (`EMAIL_DAILY_LIMIT`), random delays, Gmail-centric reply sync back to the sheet, dry-run and draft modes.
-
----
-
-## Quick start
+## Setup
 
 ```bash
 git clone https://github.com/ramjhawar-alt/outreach-mastered.git
@@ -53,75 +25,67 @@ cd outreach-mastered
 pip install -r requirements.txt
 python3 -m playwright install chromium
 cp .env.example .env
-# Edit .env — never commit real keys (see .gitignore)
 ```
 
-### Google Cloud & Sheets
+Edit `.env` with your keys (never commit `.env` or `credentials.json`).
 
-1. Enable **Google Sheets API** and **Google Drive API**.  
-2. Create a **service account**, download the JSON key (e.g. `credentials.json`).  
-3. Create a spreadsheet in your own Google account and **share it with the service account email as Editor**.  
-4. Use the spreadsheet ID from the URL: `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit`.
+| Key | What it’s for |
+|-----|----------------|
+| `GOOGLE_CREDENTIALS_PATH` | Service account JSON for Sheets |
+| `GMAIL_FROM` + `GMAIL_APP_PASSWORD` | Send email (and IMAP for drafts / reply sync) |
+| `YDC_API_KEY` | Web search for enrichment |
+| `GROQ_API_KEY` / `OPENROUTER_API_KEY` | “What they do” text (with fallback) |
+| `APOLLO_API_KEY` | Optional; only if you call Apollo from Python yourself |
+| `OUTREACH_SHEET_ID`, `OUTREACH_WORKSHEET` | Defaults so you can skip `--from-sheet` / `--worksheet` when you want |
+| `OUTREACH_RESUME_PDF` | PDF attached on generic templates |
+| `DEMO_DAY_ATTACHMENT_PDFS` | PDFs for `templates/demo_day.html` |
 
-Service accounts **cannot** own new Drive files in the same way a user account can; creating the sheet yourself and sharing it is the supported path.
-
-### Environment variables (overview)
-
-| Variable | Role |
-|----------|------|
-| `GOOGLE_CREDENTIALS_PATH` | Path to service account JSON |
-| `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | SMTP (and IMAP where used) for sending / drafts / sync |
-| `YDC_API_KEY` | Web search for enrichment (provider-specific) |
-| `GROQ_API_KEY` / `OPENROUTER_API_KEY` | LLM phrase generation and fallbacks |
-| `APOLLO_API_KEY` | Optional people search (used only from explicit Python calls — not invoked by default CLI scrape/send) |
-| `OUTREACH_SHEET_ID`, `OUTREACH_WORKSHEET` | Defaults when omitting `--from-sheet` / `--worksheet` |
-| `OUTREACH_RESUME_PDF` | Default PDF for generic templates |
-| `DEMO_DAY_ATTACHMENT_PDFS` | Comma-separated PDFs when using `templates/demo_day.html` |
-
-See **`.env.example`** for a full template.
+**Google Sheets:** enable Sheets + Drive APIs, create a service account, download the key, create a spreadsheet in your Google account, and **share that sheet with the service account email (Editor)**. Copy the sheet ID from the URL.
 
 ---
 
-## Usage (examples)
+## Usage
 
-### Scrape and export
+### Scrape and push to a sheet
 
 ```bash
 python3 main.py -e -s YOUR_SHEET_ID "https://example.com/directory"
 python3 main.py -m table -e -s YOUR_SHEET_ID "https://example.com/table-page"
-python3 main.py -m links --scroll "https://example.com/infinite-list"
+python3 main.py -m links --scroll "https://example.com/long-list"
 ```
 
-### Enrich an existing sheet (in place)
+### Enrich rows you already have
 
 ```bash
 python3 main.py --from-sheet YOUR_SHEET_ID --worksheet YourTab \
   --enrich-sheet-in-place --enrich-org --enrich-sheet-what-only --enrich-only-empty
 ```
 
-### Email outreach
+### Email from a template
 
-Template first line: `Subject: …` — then body with placeholders. Preview:
+First line of the template file: `Subject: …`. Body supports `{contact_name}`, `{organization}`, `{email}`, `{what_they_do}`.
+
+**Preview (nothing sent):**
 
 ```bash
 python3 main.py --from-sheet YOUR_SHEET_ID --worksheet YourTab \
   --email --template templates/outreach_example.txt --dry-run
 ```
 
-Daily-capped sends (random delay between messages; updates sheet + local state):
+**Send with a daily cap** (default 50/day, random delay between messages; updates the sheet + local state file):
 
 ```bash
 python3 -u main.py --email --email-daily --template templates/outreach_example.txt --yes \
   --from-sheet YOUR_SHEET_ID --worksheet YourTab
 ```
 
-Sync Gmail → sheet status (`email sent` / `replied`):
+**Sync Gmail → sheet** (mark sent / replied):
 
 ```bash
 python3 -u main.py --sync-email-replies --from-sheet YOUR_SHEET_ID --worksheet YourTab
 ```
 
-### Optional: Apollo (Python API only)
+### Apollo (optional, Python only)
 
 ```python
 from src.apollo import find_founder_email
@@ -129,68 +93,55 @@ from src.apollo import find_founder_email
 name, email, title = find_founder_email("ExampleCo", domain="example.com")
 ```
 
-Apollo is **not** called automatically from `main.py` scrape or send paths; use it deliberately when you need founder lookup.
+The normal CLI **does not** call Apollo or spend credits by itself.
 
 ---
 
-## Sheet schema
+## Sheet columns
 
-Flexible header matching (order-independent). Typical columns:
+Headers are matched by name (order does not matter). Typical layout:
 
 | Contact | Organization | Email | What they do | Source URL | Extracted At | Email status |
 |---------|--------------|-------|----------------|------------|--------------|----------------|
 
-Status values include `email not sent`, `email sent`, and `replied` (see `src/sheets.py`).
+Statuses include `email not sent`, `email sent`, and `replied` (see `src/sheets.py`).
 
 ---
 
-## CLI flags (cheat sheet)
+## CLI cheat sheet
 
-| Flag | Purpose |
+| Flag | Meaning |
 |------|---------|
-| `-m auto\|table\|links\|single` | Extraction mode |
-| `-e` / `--export` | Export to Google Sheets |
-| `-s SHEET_ID` | Append to existing sheet |
-| `--from-sheet`, `--worksheet` | Read contacts from a tab |
-| `--email`, `--template` | Send from template |
-| `--email-daily` | Daily cap, delays, state file, per-row updates |
-| `--dry-run`, `--save-draft`, `-y` | Preview, drafts, skip confirmation |
-| `--limit N` | Cap number of sends (testing) |
-| `--sync-email-replies` | Gmail → sheet status |
-| `--enrich-org`, `--enrich-sheet-in-place`, … | Org / phrase enrichment |
+| `-m auto\|table\|links\|single` | How to parse the page |
+| `-e` / `--export` | Write rows to Google Sheets |
+| `-s SHEET_ID` | Append to this spreadsheet |
+| `--from-sheet` / `--worksheet` | Read contacts from a tab |
+| `--email` + `--template` | Send mail |
+| `--email-daily` | Daily limit + delays + state |
+| `--dry-run` / `--save-draft` / `-y` | Preview / drafts / no confirm |
+| `--limit N` | Send at most N (testing) |
+| `--sync-email-replies` | Pull status from Gmail |
+| `--enrich-org`, `--enrich-sheet-in-place`, … | Fill in org / pitch text |
 
-Run `python3 main.py -h` for the full list.
-
----
-
-## Security & repo hygiene
-
-- **Never commit** `.env`, `credentials.json`, or `outreach_send_state.json` (see `.gitignore`).  
-- Use **app passwords** and least-privilege service accounts.  
-- Respect provider **rate limits** and recipient consent; this tooling is for legitimate outreach you own.
+`python3 main.py -h` lists everything.
 
 ---
 
-## Project layout (high level)
+## Repo layout
 
 ```
-main.py              # CLI entrypoint
-src/
-  browser.py         # Playwright page loads
-  extractor.py       # HTML / text extraction
-  sheets.py          # gspread read/write, migrations, status column
-  emailer.py         # Templates, MIME, SMTP, IMAP drafts
-  config.py          # Environment-driven settings
-  outreach_state.py  # Daily quota + per-row send metadata
-  reply_sync.py      # Gmail → sheet reconciliation
-templates/           # Example .txt / .html bodies
-attachments/         # PDFs (gitignored); see attachments/README.md
+main.py
+src/browser.py, extractor.py, sheets.py, emailer.py, config.py
+src/outreach_state.py, reply_sync.py
+templates/          # example bodies
+attachments/        # put PDFs here (see attachments/README.md)
 ```
 
 ---
 
-## Links
+## Notes
 
-- **Repository:** [github.com/ramjhawar-alt/outreach-mastered](https://github.com/ramjhawar-alt/outreach-mastered)
+- Do not commit secrets; use app passwords and share sheets only with your service account.  
+- Respect rate limits and only mail people you have a legitimate reason to contact.
 
-If you are a **recruiter or reviewer**: the sections above are meant to map directly to **shipping skills** (integration, CLI UX, email protocols, and cautious automation). Clone, read `main.py` and `src/emailer.py`, and trace one command end-to-end for the fastest code tour.
+Repository: [github.com/ramjhawar-alt/outreach-mastered](https://github.com/ramjhawar-alt/outreach-mastered)
